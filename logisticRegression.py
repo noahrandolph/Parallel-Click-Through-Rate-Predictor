@@ -11,7 +11,7 @@ SEED = 2615
 
 # start Spark Session
 from pyspark.sql import SparkSession
-app_name = "loadAndEDA"
+app_name = "logisticRegression"
 spark = SparkSession\
         .builder\
         .appName(app_name)\
@@ -42,19 +42,8 @@ def splitIntoTestAndTrain(df):
     return testDf, trainDf
 
 
-def displayHead(df, n=5):
-    '''returns head of the training dataset'''
-    return df.head(n)
-
-def getMedians(df, cols):
-    '''returns median values of the columns given, with null values ignored'''
-    # 0.5 relative quantile probability and 0.05 relative precision error
-    return df.approxQuantile(cols, [0.5], 0.05)
-
-df = loadData().cache()
+df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
-print("\nTEST DATASET ROW COUNTS: ", testDf.count())
-print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
-# print("HEAD\n", displayHead(trainDf))
-print("\nCOLUMN TYPES\n", df.dtypes)
-print("\nMEDIAN OF NUMERIC COLUMNS\n", getMedians(trainDf, trainDf.columns[1:14]))
+testDf.cache()
+trainDf.cache()
+
