@@ -28,13 +28,28 @@ def generateToyDataset(w=[8, -3, -1, 3, 8]):
     x4 = np.ones(nrows, np.int8) - x3   # with x3 and x4
     noise = np.random.normal(5, 1, nrows)
     v = (w[0] + x1*w[1] + x2*w[2] + x3*w[3] + x4*w[4] + noise)
-    y = (v>0).astype(int)
+    y = (v>0) * 2 - 1 # y = 1 or -1
     df = spark.createDataFrame(zip(y.tolist(), x1.tolist(), x2.tolist(), x3.tolist(), x4.tolist()))
     oldColNames = df.columns
     newColNames = ['Label']+['I{}'.format(i) for i in range(0,2)]+['C{}'.format(i) for i in range(0,2)]
     for oldName, newName in zip(oldColNames, newColNames):
         df = df.withColumnRenamed(oldName, newName)
     return df
+
+
+def logLoss(dataRDD, W):
+    """
+    Compute mean squared error.
+    Args:
+        dataRDD - each record is a tuple of (features_array, y)
+        W       - (array) model coefficients with bias at index 0
+    """
+    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
+    ################## YOUR CODE HERE ##################
+    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(W, p[0]))))) \
+                        .reduce(lambda a, b: a + b)
+    ################## (END) YOUR CODE ##################
+    return loss
 
 
 def GDUpdate(dataRDD, W, learningRate = 0.1):
@@ -73,13 +88,20 @@ def dfToRDD(row):
 df = generateToyDataset()   
 
 # convert dataframe to RDD for homegrown logistic regression
-trainRDD = df.rdd.map(dfToRDD)
+trainRDDCached = df.rdd.map(dfToRDD).cache()
 
 # create initial weights to train
-featureLen = len(trainRDD.take(1)[0][0])
+featureLen = len(trainRDDCached.take(1)[0][0])
 wInitial = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # 1 iteration of gradient descent
-w = GDUpdate(trainRDD, wInitial)
+w = GDUpdate(trainRDDCached, wInitial)
 
-print(w)
+nSteps = 5
+for idx in range(nSteps):
+    print("----------")
+    print(f"STEP: {idx+1}")
+    w = GDUpdate(trainRDDCached, w)
+    loss = logLoss(trainRDDCached, w)
+    print(f"Loss: {loss}")
+    print(f"Model: {[round(i,3) for i in w]}")
