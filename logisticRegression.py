@@ -42,6 +42,7 @@ def splitIntoTestAndTrain(df):
     return testDf, trainDf
 
 
+
 df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
 testDf.cache()

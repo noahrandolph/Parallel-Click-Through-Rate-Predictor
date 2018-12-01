@@ -4,8 +4,9 @@ from pyspark.sql import types
 from pyspark.sql.functions import udf
 
 MAINCLOUDPATH = 'gs://w261_final_project/train.txt'
-TOYCLOUDPATH = 'gs://w261_final_project/train_005.txt'
-TOYLOCALPATH = 'data/train_005.txt'
+MINICLOUDPATH = 'gs://w261_final_project/train_005.txt'
+MINILOCALPATH = 'data/train_005.txt'
+
 SEED = 2615
 
 
@@ -21,8 +22,8 @@ sc = spark.sparkContext
 
 def loadData():
     '''load the data into a Spark dataframe'''
-    # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-    df = spark.read.csv(path=TOYLOCALPATH, sep='\t')
+    # select path to data: MAINCLOUDPATH; MINICLOUDPATH; MINILOCALPATH
+    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label']+['I{}'.format(i) for i in range(0,13)]+['C{}'.format(i) for i in range(0,26)]
