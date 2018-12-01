@@ -46,10 +46,12 @@ def displayHead(df, n=5):
     '''returns head of the training dataset'''
     return df.head(n)
 
+
 def getMedians(df, cols):
-    '''returns median values of the columns given, with null values ignored'''
+    '''returns approximate median values of the columns given, with null values ignored'''
     # 0.5 relative quantile probability and 0.05 relative precision error
     return df.approxQuantile(cols, [0.5], 0.05)
+
 
 df = loadData().cache()
 testDf, trainDf = splitIntoTestAndTrain(df)
