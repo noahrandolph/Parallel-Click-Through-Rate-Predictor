@@ -65,7 +65,7 @@ def GDUpdate(dataRDD, W, learningRate = 0.1):
     augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1])).cache()
     
     ################## YOUR CODE HERE ################# 
-    grad = augmentedData.map(lambda p: (-p[0] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
+    grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
                         .reduce(lambda a, b: a + b)
     new_model = W - learningRate * grad
     ################## (END) YOUR CODE ################# 
@@ -79,29 +79,47 @@ def dfToRDD(row):
         From: DataFrame['Label', 'I0', ..., 'C0', ...]
         To:   (features_array, y)
     '''
-    features_array = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + [row['I{}'.format(i)] for i in range(0, ONEHOTCOLS)]
+#     fields = np.array(line.split(';'), dtype = 'float')
+#     features,quality = fields[:-1], fields[-1]
+    
+    features_list = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + [row['I{}'.format(i)] for i in range(0, ONEHOTCOLS)]
+    features_array = np.array(features_list)
     y = row['Label']
     return (features_array, y)
-    
+
+
+def normalize(dataRDD):
+    """
+    Scale and center data around the mean of each feature.
+    """
+    featureMeans = dataRDD.map(lambda x: x[0]).mean()
+    featureStdev = np.sqrt(dataRDD.map(lambda x: x[0]).variance())
+    normedRDD = dataRDD.map(lambda x: ((x[0] - featureMeans)/featureStdev, x[1]))
+    return normedRDD
+
 
 # create a toy dataset that includes 1-hot columns for development
 df = generateToyDataset()   
 
 # convert dataframe to RDD for homegrown logistic regression
-trainRDDCached = df.rdd.map(dfToRDD).cache()
+trainRDD = df.rdd.map(dfToRDD)
+
+# normalize RDD
+normedRDDcached = normalize(trainRDD).cache()
+print(normedRDDcached.take(1))
 
 # create initial weights to train
-featureLen = len(trainRDDCached.take(1)[0][0])
+featureLen = len(normedRDDcached.take(1)[0][0])
 wInitial = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # 1 iteration of gradient descent
-w = GDUpdate(trainRDDCached, wInitial)
+w = GDUpdate(normedRDDcached, wInitial)
 
 nSteps = 5
 for idx in range(nSteps):
     print("----------")
     print(f"STEP: {idx+1}")
-    w = GDUpdate(trainRDDCached, w)
-    loss = logLoss(trainRDDCached, w)
+    w = GDUpdate(normedRDDcached, w)
+    loss = logLoss(normedRDDcached, w)
     print(f"Loss: {loss}")
     print(f"Model: {[round(i,3) for i in w]}")
