@@ -90,14 +90,15 @@ n = 10
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
-setsMostFreqCatDict = {key: set(value) for key, value in mostFreqCatDict.items()}
+bsetsMostFreqCatDict = broadcast({key: set(value) for key, value in mostFreqCatDict.items()})
 
 # get the top category from each column for imputation of missing values
 fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, value in mostFreqCatDict.items()}
 
 # get dict of median numeric values for imputation of missing values
 fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
-                                                    [x[0] for x in getMedians(trainDf, trainDf.columns[1:NUMERICCOLS+1])])}
+                                                    [x[0] for x in getMedians(trainDf,
+                                                                              trainDf.columns[1:NUMERICCOLS+1])])}
 
 # impute missing values
 trainDf = trainDf.na.fill(fillNADictNum) \
@@ -105,8 +106,10 @@ trainDf = trainDf.na.fill(fillNADictNum) \
 
 # replace low-frequency categories with 'rare' string
 for colName in trainDf.columns[NUMERICCOLS+1:]:
-    bagOfCats = setsMostFreqCatDict[colName]
-    trainDf = trainDf.withColumn(colName, udf(lambda x: 'rare' if x in bagOfCats else x, StringType())(trainDf[colName]))
+    bagOfCats = bsetsMostFreqCatDict[colName]
+    trainDf = trainDf.withColumn(colName, 
+                                 udf(lambda x: 'rare' if x not in bagOfCats else x, 
+                                     StringType())(trainDf[colName])).cache()
 
 
 # # convert dataframe to RDD
