@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 
 from pyspark.sql import types
-from pyspark.sql.functions import udf
-from pyspark.sql.functions import desc
+from pyspark.sql.functions import udf, desc, isnan
 import numpy as np
 
 
@@ -81,19 +80,36 @@ def dfToRDD(row):
 
 
 
+# load data
 df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
 testDf.cache()
 trainDf.cache()
 
+# get top n most frequent categories for each column
+n = 10
+mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
+
+# get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
+setsMostFreqCatDict = {key: set(value) for key, value in mostFreqCatDict.items()}
+
+# get the top category from each column for imputation of missing values
+fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, value in mostFreqCatDict.items()}
+
 # get dict of median numeric values for imputation of missing values
 fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
                                                     [x[0] for x in getMedians(trainDf, trainDf.columns[1:NUMERICCOLS+1])])}
 
-# get top n most frequent categories for each column
-mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, 10)
+# impute missing values and change low frequency categories to 'rare' category
+trainDf = trainDf.na.fill(fillNADictNum).na.fill(fillNADictCat)
 
+# # save feature column names for RDD composite keys
+# featureNames = trainDf.columns
 
-trainRDD = trainDf.rdd.map(dfToRDD).cache()
+# # convert dataframe to RDD
+# trainRDD = trainDf.rdd.map(dfToRDD).cache()
 
-print(mostFreqCatDict)
+# impute missing values and change low frequency categories to 'rare' category
+# trainRDD = trainRDD.map()
+
+print(trainDf.take(3))
