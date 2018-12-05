@@ -66,6 +66,16 @@ def getMostFrequentCats(df, cols, n):
         freqCatDict[col] = topCats[:n]
     return freqCatDict
     
+
+def rareReplacer(df, dictOfMostFreqSets):
+    '''
+    Iterates through columns and replaces non-Frequent categories with 'rare' string.
+    '''
+    for colName in df.columns[NUMERICCOLS+1:]:
+        bagOfCats = dictOfMostFreqSets[colName]
+        df = df.withColumn(colName, udf(lambda x: 'rare' if x not in bagOfCats else x, StringType())(df[colName])).cache()
+    return df
+
     
 def dfToRDD(row):
     '''
@@ -85,34 +95,31 @@ testDf, trainDf = splitIntoTestAndTrain(df)
 testDf.cache()
 trainDf.cache()
 
-# get top n most frequent categories for each column
+# get top n most frequent categories for each column (in training set only)
 n = 100
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
 setsMostFreqCatDict = {key: set(value) for key, value in mostFreqCatDict.items()}
 
-# get the top category from each column for imputation of missing values
+# get the top category from each column for imputation of missing values (in training set only)
 fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, value in mostFreqCatDict.items()}
 
-# get dict of median numeric values for imputation of missing values
+# get dict of median numeric values for imputation of missing values (in training set only)
 fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
                                                     [x[0] for x in getMedians(trainDf,
                                                                               trainDf.columns[1:NUMERICCOLS+1])])}
 
-# impute missing values
+# impute missing values in training and test set
 trainDf = trainDf.na.fill(fillNADictNum) \
-                 .na.fill(fillNADictCat)
+                 .na.fill(fillNADictCat).cache()
+testDf = testDf.na.fill(fillNADictNum) \
+               .na.fill(fillNADictCat).cache()
 
-# replace low-frequency categories with 'rare' string
-for colName in trainDf.columns[NUMERICCOLS+1:]:
-    bagOfCats = setsMostFreqCatDict[colName]
-    trainDf = trainDf.withColumn(colName, 
-                                 udf(lambda x: 'rare' if x not in bagOfCats else x, 
-                                     StringType())(trainDf[colName])).cache()
+# replace low-frequency categories with 'rare' string in training and test set
+trainDf = rareReplacer(trainDf, setsMostFreqCatDict)
+testDf = rareReplacer(testDf, setsMostFreqCatDict)
 
-
-# # convert dataframe to RDD
-# trainRDD = trainDf.rdd.map(dfToRDD).cache()
 
 print(trainDf.take(3))
+print(testDf.take(3))
