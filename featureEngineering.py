@@ -86,11 +86,11 @@ testDf.cache()
 trainDf.cache()
 
 # get top n most frequent categories for each column
-n = 10
+n = 100
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
-bsetsMostFreqCatDict = broadcast({key: set(value) for key, value in mostFreqCatDict.items()})
+setsMostFreqCatDict = {key: set(value) for key, value in mostFreqCatDict.items()}
 
 # get the top category from each column for imputation of missing values
 fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, value in mostFreqCatDict.items()}
@@ -106,7 +106,7 @@ trainDf = trainDf.na.fill(fillNADictNum) \
 
 # replace low-frequency categories with 'rare' string
 for colName in trainDf.columns[NUMERICCOLS+1:]:
-    bagOfCats = bsetsMostFreqCatDict[colName]
+    bagOfCats = setsMostFreqCatDict[colName]
     trainDf = trainDf.withColumn(colName, 
                                  udf(lambda x: 'rare' if x not in bagOfCats else x, 
                                      StringType())(trainDf[colName])).cache()
