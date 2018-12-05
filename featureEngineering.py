@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-from pyspark.sql import types
-from pyspark.sql.functions import udf, desc, isnan
+from pyspark.sql.types import StringType
+from pyspark.sql.functions import udf, desc, isnan, when
 import numpy as np
 
 
@@ -15,7 +15,7 @@ SEED = 2615
 
 # start Spark Session
 from pyspark.sql import SparkSession
-app_name = "logisticRegression"
+app_name = "featureEngineering"
 spark = SparkSession\
         .builder\
         .appName(app_name)\
@@ -26,7 +26,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-    df = spark.read.csv(path=TOYLOCALPATH, sep='\t')
+    df = spark.read.csv(path=TOYCLOUDPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label']+['I{}'.format(i) for i in range(0,NUMERICCOLS)]+['C{}'.format(i) for i in range(0,CATEGORICALCOLS)]
@@ -79,7 +79,6 @@ def dfToRDD(row):
     return (features_array, y)
 
 
-
 # load data
 df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
@@ -100,16 +99,17 @@ fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, 
 fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
                                                     [x[0] for x in getMedians(trainDf, trainDf.columns[1:NUMERICCOLS+1])])}
 
-# impute missing values and change low frequency categories to 'rare' category
-trainDf = trainDf.na.fill(fillNADictNum).na.fill(fillNADictCat)
+# impute missing values
+trainDf = trainDf.na.fill(fillNADictNum) \
+                 .na.fill(fillNADictCat)
 
-# # save feature column names for RDD composite keys
-# featureNames = trainDf.columns
+# replace low-frequency categories with 'rare' string
+for colName in trainDf.columns[NUMERICCOLS+1:]:
+    bagOfCats = setsMostFreqCatDict[colName]
+    trainDf = trainDf.withColumn(colName, udf(lambda x: 'rare' if x in bagOfCats else x, StringType())(trainDf[colName]))
+
 
 # # convert dataframe to RDD
 # trainRDD = trainDf.rdd.map(dfToRDD).cache()
-
-# impute missing values and change low frequency categories to 'rare' category
-# trainRDD = trainRDD.map()
 
 print(trainDf.take(3))
