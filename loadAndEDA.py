@@ -72,25 +72,41 @@ def getCorrMatrix(df, cols):
     corr_df = pd.DataFrame(corr_mat)
     corr_df.index, corr_df.columns = col_names, col_names
     return corr_df
-    
-    
+
+def getTopCountsValues(df, n, cols):
+    topCounts_dict= {key: value for (key, value) in zip(cols, 
+                                        [[x[1] for x in df.groupBy(c).count().sort(desc("count")).head(n)] \
+                                         for c in cols])}
+    return topCounts_dict
+
 df = loadData().cache()
 testDf, trainDf = splitIntoTestAndTrain(df)
-#print("\nTEST DATASET ROW COUNTS: ", testDf.count())
-#print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
-## print("HEAD\n", displayHead(trainDf))
-#print("\nCOLUMN TYPES\n", df.dtypes)
-#print("\nMEDIAN OF NUMERIC COLUMNS\n", getMedians(trainDf, trainDf.columns[1:14]))
+print("\nTEST DATASET ROW COUNTS: ", testDf.count())
+print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
+# print("HEAD\n", displayHead(trainDf))
+print("\nCOLUMN TYPES\n", df.dtypes)
+print("\nMEDIAN OF NUMERIC COLUMNS\n", getMedians(trainDf, trainDf.columns[1:14]))
 
-#print("\nDESCRIPTIONS OF NUMERICAL COLUMNS 1-7\n")
-#getDescribe(trainDf, trainDf.columns[1:8])
-#print("\nDESCRIPTIONS OF NUMERICAL COLUMNS 8-14\n")
-#getDescribe(trainDf, trainDf.columns[8:15])
-#print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL VARIABLE COLUMNS")
-#getDistinctCount(trainDf, trainDf.columns[15:])
+print("\nDESCRIPTIONS OF NUMERICAL COLUMNS")
+getDescribe(trainDf, trainDf.columns[1:8])
+getDescribe(trainDf, trainDf.columns[8:14])
 
-#print("\nCOUNTS OF NAs FOR COLUMN 0 - 19")
-#checkNA(trainDf, trainDf.columns[:20])
-#print("\nCOUNTS OF NAs FOR COLUMN 20 - 39")
-#checkNA(trainDf, trainDf.columns[20:])
-getCorrMatrix(trainDf, trainDf.columns[1:14])
+print("\nCOUNTS OF NAs")
+checkNA(trainDf, trainDf.columns[:20])
+checkNA(trainDf, trainDf.columns[20:])
+
+#print("\nCORRELATION MATRIX")
+#getCorrMatrix(trainDf, trainDf.columns[1:14]) # This doesn't work if there's NA in there
+
+print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL VARIABLE COLUMNS")
+getDistinctCount(trainDf, trainDf.columns[15:])
+
+print("\nOCCURENCE COUNT OF TOP 5 MOST FREQUENT VALUES FOR EACH VARIABLE")
+count_n = 3 # Max can only be 3 because one column has only 3 categorical values
+print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[1:12])))
+print("\n")
+print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[12:23])))
+print("\n")
+print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[23:34])))
+print("\n")
+print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[34:])))
