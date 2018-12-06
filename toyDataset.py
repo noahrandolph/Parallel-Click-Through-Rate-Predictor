@@ -78,11 +78,8 @@ def dfToRDD(row):
     Converts dataframe row to rdd format.
         From: DataFrame['Label', 'I0', ..., 'C0', ...]
         To:   (features_array, y)
-    '''
-#     fields = np.array(line.split(';'), dtype = 'float')
-#     features,quality = fields[:-1], fields[-1]
-    
-    features_list = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + [row['I{}'.format(i)] for i in range(0, ONEHOTCOLS)]
+    '''    
+    features_list = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + [row['C{}'.format(i)] for i in range(0, ONEHOTCOLS)]
     features_array = np.array(features_list)
     y = row['Label']
     return (features_array, y)
@@ -101,8 +98,11 @@ def normalize(dataRDD):
 # create a toy dataset that includes 1-hot columns for development
 df = generateToyDataset()   
 
-# convert dataframe to RDD for homegrown logistic regression
+# convert dataframe to RDD 
 trainRDD = df.rdd.map(dfToRDD)
+
+
+
 
 # normalize RDD
 normedRDDcached = normalize(trainRDD).cache()
