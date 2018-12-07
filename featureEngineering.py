@@ -2,6 +2,7 @@
 
 from pyspark.sql.types import StringType
 from pyspark.sql.functions import udf, desc, isnan, when
+from pyspark.ml.feature import OneHotEncoderEstimator, StringIndexer
 import numpy as np
 
 
@@ -26,7 +27,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-    df = spark.read.csv(path=TOYCLOUDPATH, sep='\t')
+    df = spark.read.csv(path=TOYLOCALPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label']+['I{}'.format(i) for i in range(0,NUMERICCOLS)]+['C{}'.format(i) for i in range(0,CATEGORICALCOLS)]
@@ -96,7 +97,7 @@ testDf.cache()
 trainDf.cache()
 
 # get top n most frequent categories for each column (in training set only)
-n = 100
+n = 10
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
@@ -117,9 +118,27 @@ testDf = testDf.na.fill(fillNADictNum) \
                .na.fill(fillNADictCat).cache()
 
 # replace low-frequency categories with 'rare' string in training and test set
-trainDf = rareReplacer(trainDf, setsMostFreqCatDict)
-testDf = rareReplacer(testDf, setsMostFreqCatDict)
+trainDf = rareReplacer(trainDf, setsMostFreqCatDict) # df gets cached in function
+testDf = rareReplacer(testDf, setsMostFreqCatDict) # df gets cached in function
 
+# numerically index categorical columns for one-hot encoder
+for catColumn in trainDf.columns[NUMERICCOLS+1:]:
+    catIndexer = StringIndexer(inputCol=catColumn, outputCol=catColumn+'Index', handleInvalid='keep') # forces you to have different in and out col names
+    stringIndexerModel = catIndexer.fit(trainDf)
+    trainDf = stringIndexerModel.transform(trainDf).drop(catColumn).cache() # original string columns are kept in dataframe so should be deleted
+    testDf = stringIndexerModel.transform(testDf).drop(catColumn).cache()
 
-print(trainDf.take(3))
-print(testDf.take(3))
+# convert categorical columns to 1 hot encoded columns
+indexColumnNames = trainDf.columns[NUMERICCOLS+1:]
+oneHotColumnNames = [column.replace('Index', '') for column in trainDf.columns[NUMERICCOLS+1:]]
+oneHotEncoder = OneHotEncoderEstimator(inputCols=indexColumnNames, outputCols=oneHotColumnNames) # forces you to have different in and out column names
+oneHotModel = oneHotEncoder.fit(trainDf)                                                                        
+trainDf = oneHotModel.transform(trainDf).cache()
+testDf = oneHotModel.transform(testDf).cache()
+
+# drop the index columns (original string columns are kept in dataframe so should be deleted)
+for column in indexColumnNames:
+    trainDf = trainDf.drop(column).cache() 
+    testDf = testDf.drop(column).cache()
+
+print(trainDf.take(1))
