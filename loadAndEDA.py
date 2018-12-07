@@ -102,7 +102,7 @@ print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL VARIABLE COLUMNS")
 getDistinctCount(trainDf, trainDf.columns[15:])
 
 print("\nOCCURENCE COUNT OF TOP 5 MOST FREQUENT VALUES FOR EACH VARIABLE")
-count_n = 3 # Max can only be 3 because one column has only 3 categorical values
+count_n = 3 # Max can only be 3 because one column (c8) has only 3 categorical values
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[1:12])))
 print("\n")
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[12:23])))
