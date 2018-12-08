@@ -117,7 +117,49 @@ def oneHotEncoder(line):
     for catColName, element in zip(CATCOLNAMES, elements):
         oneHotDict[(catColName, element)] = 1
     numericElements = list(line[0][:NUMERICCOLS])
-    return (numericElements + [value for key, value in oneHotDict.items()], line[1])
+    features = np.array(numericElements + [value for key, value in oneHotDict.items()], dtype=np.float)
+    return (features, line[1])
+
+
+def normalize(dataRDD):
+    """
+    Scale and center data around the mean of each feature.
+    """
+    featureMeans = dataRDD.map(lambda x: x[0]).mean()
+    featureStdev = np.sqrt(dataRDD.map(lambda x: x[0]).variance())
+    normedRDD = dataRDD.map(lambda x: ((x[0] - featureMeans)/featureStdev, x[1]))
+    return normedRDD
+
+
+def logLoss(dataRDD, W):
+    """
+    Compute mean squared error.
+    Args:
+        dataRDD - each record is a tuple of (features_array, y)
+        W       - (array) model coefficients with bias at index 0
+    """
+    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
+    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(W, p[0]))))) \
+                        .reduce(lambda a, b: a + b)
+    return loss
+
+
+def GDUpdate(dataRDD, W, learningRate = 0.1):
+    """
+    Perform one OLS gradient descent step/update.
+    Args:
+        dataRDD - records are tuples of (features_array, y)
+        W       - (array) model coefficients with bias at index 0
+    Returns:
+        new_model - (array) updated coefficients, bias at index 0
+    """
+    # add a bias 'feature' of 1 at index 0
+    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1])).cache()
+    
+    grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
+                        .reduce(lambda a, b: a + b)
+    new_model = W - learningRate * grad 
+    return new_model
 
 
 # load data
@@ -151,30 +193,6 @@ testDf = testDf.na.fill(fillNADictNum) \
 trainDf = rareReplacer(trainDf, setsMostFreqCatDict) # df gets cached in function
 testDf = rareReplacer(testDf, setsMostFreqCatDict) # df gets cached in function
 
-# # numerically index categorical columns for one-hot encoder and to combine rare categories into one
-# for catColumn in trainDf.columns[NUMERICCOLS+1:]:
-#     catIndexer = StringIndexer(inputCol=catColumn, outputCol=catColumn+'Index', handleInvalid='error') # forces you to have different in & out col names
-#     stringIndexerModel = catIndexer.fit(trainDf)
-#     trainDf = stringIndexerModel.transform(trainDf).drop(catColumn).cache() # original string columns are kept in dataframe so should be deleted
-#     testDf = stringIndexerModel.transform(testDf).drop(catColumn).cache()
-    
-# # convert categorical columns to 1 hot encoded columns
-# indexColumnNames = trainDf.columns[NUMERICCOLS+1:]
-# oneHotColumnNames = [column.replace('Index', '') for column in trainDf.columns[NUMERICCOLS+1:]]
-# oneHotEncoder = OneHotEncoderEstimator(inputCols=indexColumnNames, outputCols=oneHotColumnNames) # forces you to have different in & out column names
-# oneHotModel = oneHotEncoder.fit(trainDf)                                                                        
-# trainDf = oneHotModel.transform(trainDf).cache()
-# testDf = oneHotModel.transform(testDf).cache()
-
-# # drop the index columns (original string columns are kept in dataframe so should be deleted)
-# for column in indexColumnNames:
-#     trainDf = trainDf.drop(column) 
-#     testDf = testDf.drop(column)
-
-# # convert SparseVectors to 1D arrays in order to convert dataframe to RDD    
-# for column in trainDf.columns[NUMERICCOLS+1:]:
-#     trainDf = trainDf.withColumn(column, udf(lambda x: list(OrderedDict((y, None) for y in x)))(trainDf[column])).cache()
-
 # convert dataframe to RDD 
 trainRDD = trainDf.rdd.map(dfToRDD).cache()
 testRDD = testDf.rdd.map(dfToRDD).cache()
@@ -185,7 +203,25 @@ oneHotReference = trainRDD.flatMap(emitColumnAndCat) \
 sc.broadcast(oneHotReference)
 
 # replace rows with new rows having categorical columns 1-hot encoded
-trainRDD1Hot = trainRDD.map(oneHotEncoder)
+trainRDD = trainRDD.map(oneHotEncoder).cache()
+testRDD = testRDD.map(oneHotEncoder).cache()
 
+# normalize RDD
+normedTrainRDD = normalize(trainRDD).cache()
+normedTestRDD = normalize(testRDD).cache() # use the mean and st. dev. from trainRDD
 
-print(trainRDD1Hot.takeSample(False, 5, SEED))
+# create initial weights to train
+featureLen = len(normedTrainRDD.take(1)[0][0])
+wInitial = np.random.normal(size=featureLen+1) # add 1 for bias
+
+# 1 iteration of gradient descent
+w = GDUpdate(normedTrainRDD, wInitial)
+
+nSteps = 10
+for idx in range(nSteps):
+    print("----------")
+    print(f"STEP: {idx+1}")
+    w = GDUpdate(normedTrainRDD, w)
+    loss = logLoss(normedTrainRDD, w)
+    print(f"Loss: {loss}")
+    print(f"Model: {[round(i,3) for i in w]}")
