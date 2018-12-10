@@ -5,6 +5,7 @@ from pyspark.sql.functions import udf, desc, isnan, when
 import numpy as np
 from operator import add
 import copy
+import time
 
 
 MAINCLOUDPATH = 'gs://w261_final_project/train.txt'
@@ -121,13 +122,21 @@ def oneHotEncoder(line):
     return (features, line[1])
 
 
-def normalize(dataRDD):
+def getMeanAndVar(trainRDD):
+    """
+    Returns the mean and variance of the training dataset for use in normalizing future records
+    (e.g. the test set) to be run on model.
+    """
+    featureMeans = trainRDD.map(lambda x: x[0]).mean()
+    featureStDevs = np.sqrt(trainRDD.map(lambda x: x[0]).variance())
+    return featureMeans, featureStDevs
+    
+
+def normalize(dataRDD, featureMeans, featureStDevs):
     """
     Scale and center data around the mean of each feature.
     """
-    featureMeans = dataRDD.map(lambda x: x[0]).mean()
-    featureStdev = np.sqrt(dataRDD.map(lambda x: x[0]).variance())
-    normedRDD = dataRDD.map(lambda x: ((x[0] - featureMeans)/featureStdev, x[1]))
+    normedRDD = dataRDD.map(lambda x: ((x[0] - featureMeans)/featureStDevs, x[1]))
     return normedRDD
 
 
@@ -160,6 +169,39 @@ def GDUpdate(dataRDD, W, learningRate = 0.1):
                         .reduce(lambda a, b: a + b)
     new_model = W - learningRate * grad 
     return new_model
+
+
+def GradientDescent(trainRDD, testRDD, wInit, nSteps = 20, 
+                    learningRate = 0.1, verbose = False):
+    """
+    Perform nSteps iterations of log loss gradient descent and 
+    track loss on a test and train set. Return lists of
+    test/train loss and the models themselves.
+    """
+    # initialize lists to track model performance
+    train_history, test_history, model_history = [], [], []
+    
+    # perform n updates & compute test and train loss after each
+    model = wInit
+    for idx in range(nSteps): 
+        model = GDUpdate(trainRDD, model, learningRate)
+        training_loss = logLoss(trainRDD, model) 
+        test_loss = logLoss(testRDD, model) 
+        
+        # keep track of test/train loss for plotting
+        train_history.append(training_loss)
+        test_history.append(test_loss)
+        model_history.append(model)
+        
+        # console output if desired
+        if verbose:
+            print("----------")
+            print(f"STEP: {idx+1}")
+            print(f"training loss: {training_loss}")
+            print(f"test loss: {test_loss}")
+            print(f"Model: {[round(w,3) for w in model]}")
+    return train_history, test_history, model_history
+
 
 
 # load data
@@ -207,21 +249,27 @@ trainRDD = trainRDD.map(oneHotEncoder).cache()
 testRDD = testRDD.map(oneHotEncoder).cache()
 
 # normalize RDD
-normedTrainRDD = normalize(trainRDD).cache()
-normedTestRDD = normalize(testRDD).cache() # use the mean and st. dev. from trainRDD
+featureMeans, featureStDevs = getMeanAndVar(trainRDD)
+trainRDD = normalize(trainRDD, featureMeans, featureStDevs).cache()
+testRDD = normalize(testRDD, featureMeans, featureStDevs).cache() # use the mean and st. dev. from trainRDD
 
 # create initial weights to train
-featureLen = len(normedTrainRDD.take(1)[0][0])
-wInitial = np.random.normal(size=featureLen+1) # add 1 for bias
+featureLen = len(trainRDD.take(1)[0][0])
+wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
-# 1 iteration of gradient descent
-w = GDUpdate(normedTrainRDD, wInitial)
+# # 1 iteration of gradient descent
+# w = GDUpdate(trainRDD, wInit)
 
-nSteps = 10
-for idx in range(nSteps):
-    print("----------")
-    print(f"STEP: {idx+1}")
-    w = GDUpdate(normedTrainRDD, w)
-    loss = logLoss(normedTrainRDD, w)
-    print(f"Loss: {loss}")
-    print(f"Model: {[round(i,3) for i in w]}")
+# nSteps = 10
+# for idx in range(nSteps):
+#     print("----------")
+#     print(f"STEP: {idx+1}")
+#     w = GDUpdate(trainRDD, w)
+#     loss = logLoss(trainRDD, w)
+#     print(f"Loss: {loss}")
+#     print(f"Model: {[round(i,3) for i in w]}")
+
+# run 50 iterations
+start = time.time()
+logLosstrain, logLosstest, models = GradientDescent(trainRDD, testRDD, wInit, nSteps = 50, verbose = True)
+print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
