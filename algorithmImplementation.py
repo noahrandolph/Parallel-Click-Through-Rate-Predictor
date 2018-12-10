@@ -9,8 +9,8 @@ import time
 
 
 MAINCLOUDPATH = 'gs://w261_final_project/train.txt'
-TOYCLOUDPATH = 'gs://w261_final_project/train_005.txt'
-TOYLOCALPATH = 'data/train_005.txt'
+MINICLOUDPATH = 'gs://w261_final_project/train_005.txt'
+MINILOCALPATH = 'data/train_005.txt'
 NUMERICCOLS = 13
 CATEGORICALCOLS = 26
 NUMERICCOLNAMES = ['I{}'.format(i) for i in range(0,NUMERICCOLS)]
@@ -31,6 +31,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
+#    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
     df = spark.read.csv(path=MAINCLOUDPATH, sep='\t')
     # change column names
     oldColNames = df.columns
@@ -204,6 +205,67 @@ def GradientDescent(trainRDD, testRDD, wInit, nSteps = 20,
             print(f"Model: {[round(w,3) for w in model]}")
     return train_history, test_history, model_history
 
+def GDUpdate_wReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0.1):
+    """
+    Perform one gradient descent step/update with ridge or lasso regularization.
+    Args:
+        dataRDD - tuple of (features_array, y)
+        W       - (array) model coefficients with bias at index 0
+        learningRate - (float) defaults to 0.1
+        regType - (str) 'ridge' or 'lasso', defaults to None
+        regParam - (float) regularization term coefficient
+    Returns:
+        model   - (array) updated coefficients, bias still at index 0
+    """
+    # augmented data
+    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
+    
+    new_model = None
+
+    W = np.array(W)
+    b_W = sc.broadcast(W)
+    
+    grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
+                        .reduce(lambda a, b: a + b)
+    regType = regType.lower()
+    
+    if regType == "lasso": #L1 regularization
+        grad[1:] += regParam * np.sign(W[1:])
+    elif regType == "ridge": #L2 regularization
+        grad[1:] += 2 * regParam * W[1:]
+        
+    new_model = W - (grad * learningRate)    
+    
+    return new_model
+
+def GradientDescent_wReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate = 0.1,
+                         regType = None, regParam = 0.1, verbose = False):
+    """
+    Perform nSteps iterations of regularized gradient descent and 
+    track loss on a test and train set. Return lists of
+    test/train loss and the models themselves.
+    """
+    # initialize lists to track model performance
+    train_history, test_history, model_history = [], [], []
+    
+    model = wInit
+    for idx in range(nSteps):  
+        # update the model
+        model = GDUpdate_wReg(trainRDD, model, learningRate, regType, regParam)
+        
+        # keep track of test/train loss for plotting
+        train_history.append(logLoss(trainRDD, model))
+        test_history.append(logLoss(testRDD, model))
+        model_history.append(model)
+        
+        # console output if desired
+        if verbose:
+            print("----------")
+            print(f"STEP: {idx+1}")
+            print(f"training loss: {training_loss}")
+            print(f"test loss: {test_loss}")
+            print(f"Model: {[round(w,3) for w in model]}")
+    return train_history, test_history, model_history
 
 
 # load data
@@ -261,5 +323,5 @@ wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # run 50 iterations
 start = time.time()
-logLosstrain, logLosstest, models = GradientDescent(trainRDD, testRDD, wInit, nSteps = 50, verbose = False)
+logLosstrain, logLosstest, models = GradientDescent_wReg(trainRDD, testRDD, wInit, nSteps = 50, regType = "Lasso", verbose = False)
 print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
