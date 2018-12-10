@@ -63,13 +63,9 @@ def GDUpdate(dataRDD, W, learningRate = 0.1):
     """
     # add a bias 'feature' of 1 at index 0
     augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1])).cache()
-    
-    ################## YOUR CODE HERE ################# 
     grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
                         .reduce(lambda a, b: a + b)
     new_model = W - learningRate * grad
-    ################## (END) YOUR CODE ################# 
-    
     return new_model
 
 

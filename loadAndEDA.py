@@ -1,9 +1,15 @@
 #!/usr/bin/env python
+import subprocess
+
+subprocess.call(["pip","install","seaborn"])
 
 from pyspark.sql import types
 from pyspark.sql.functions import udf, col, countDistinct, isnan, when, count, desc
 import pandas as pd
 from pyspark.mllib.stat import Statistics
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 MAINCLOUDPATH = 'gs://w261_final_project/train.txt'
 MINICLOUDPATH = 'gs://w261_final_project/train_005.txt'
@@ -45,11 +51,6 @@ def splitIntoTestAndTrain(df):
     return testDf, trainDf
 
 
-def displayHead(df, n=5):
-    '''returns head of the training dataset'''
-    return df.head(n)
-
-
 def getMedians(df, cols):
     '''returns approximate median values of the columns given, with null values ignored'''
     # 0.5 relative quantile probability and 0.05 relative precision error
@@ -64,26 +65,33 @@ def getDistinctCount(df, cols):
 def checkNA(df, cols):
     return df.select([count(when(isnan(c) | col(c).isNull(), c)).alias(c) for c in cols]).show()
 
-def getCorrMatrix(df, cols):
-    df = df.select(cols)
-    col_names = df.columns
-    features = df.rdd.map(lambda row: row[0:])
-    corr_mat=Statistics.corr(features, method="pearson")
-    corr_df = pd.DataFrame(corr_mat)
-    corr_df.index, corr_df.columns = col_names, col_names
-    return corr_df
-
 def getTopCountsValues(df, n, cols):
     topCounts_dict= {key: value for (key, value) in zip(cols, 
                                         [[x[1] for x in df.groupBy(c).count().sort(desc("count")).head(n)] \
                                          for c in cols])}
     return topCounts_dict
 
+def plotHist(df):
+    '''plot histogram of numeric features'''
+    df.hist(figsize=(15,15), bins=15)
+    return plt.show()
+
+def CorrMatrix(df):
+    '''get correlation matrix of numeric features'''
+    corr = df.corr()
+    fig, ax = plt.subplots(figsize=(11, 9))
+    mask = np.zeros_like(corr, dtype=np.bool)
+    mask[np.triu_indices_from(mask)] = True
+    cmap = sns.diverging_palette(240, 10, as_cmap=True)
+    sns.heatmap(corr, mask=mask, cmap=cmap, center=0, linewidths=.5)
+    plt.title("Correlations between numerical features.")
+    return plt.show()
+
+
 df = loadData().cache()
 testDf, trainDf = splitIntoTestAndTrain(df)
 print("\nTEST DATASET ROW COUNTS: ", testDf.count())
 print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
-# print("HEAD\n", displayHead(trainDf))
 print("\nCOLUMN TYPES\n", df.dtypes)
 print("\nMEDIAN OF NUMERIC COLUMNS\n", getMedians(trainDf, trainDf.columns[1:14]))
 
@@ -95,13 +103,10 @@ print("\nCOUNTS OF NAs")
 checkNA(trainDf, trainDf.columns[:20])
 checkNA(trainDf, trainDf.columns[20:])
 
-#print("\nCORRELATION MATRIX")
-#getCorrMatrix(trainDf, trainDf.columns[1:14]) # This doesn't work if there's NA in there
-
 print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL VARIABLE COLUMNS")
 getDistinctCount(trainDf, trainDf.columns[15:])
 
-print("\nOCCURENCE COUNT OF TOP 5 MOST FREQUENT VALUES FOR EACH VARIABLE")
+print("\nOCCURENCE COUNT OF TOP 3 MOST FREQUENT VALUES FOR EACH VARIABLE")
 count_n = 3 # Max can only be 3 because one column (c8) has only 3 categorical values
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[1:12])))
 print("\n")
@@ -110,3 +115,9 @@ print("\n")
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[23:34])))
 print("\n")
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[34:])))
+
+pandaTrain =trainDf.toPandas()
+print("\nHistograms for Numeric Values")
+plotHist(pandaTrain)
+print("\nCorrelation Matrix between Numeric Values")
+CorrMatrix(pandaTrain)

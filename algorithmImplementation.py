@@ -20,7 +20,7 @@ SEED = 2615
 
 # start Spark Session
 from pyspark.sql import SparkSession
-app_name = "featureEngineering"
+app_name = "algorithmImplementation"
 spark = SparkSession\
         .builder\
         .appName(app_name)\
@@ -31,7 +31,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-    df = spark.read.csv(path=TOYLOCALPATH, sep='\t')
+    df = spark.read.csv(path=MAINCLOUDPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label'] + NUMERICCOLNAMES + CATCOLNAMES
@@ -78,7 +78,8 @@ def rareReplacer(df, dictOfMostFreqSets):
     '''
     for colName in df.columns[NUMERICCOLS+1:]:
         bagOfCats = dictOfMostFreqSets[colName]
-        df = df.withColumn(colName, udf(lambda x: 'rare' if x not in bagOfCats else x, StringType())(df[colName])).cache()
+        df = df.withColumn(colName, 
+                           udf(lambda x: 'rare' if x not in bagOfCats else x, StringType())(df[colName])).cache()
     return df
 
     
@@ -88,7 +89,8 @@ def dfToRDD(row):
         From: DataFrame['Label', 'I0', ..., 'C0', ...]
         To:   (features_array, y)
     '''    
-    features_list = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + [row['C{}'.format(i)] for i in range(0, CATEGORICALCOLS)]
+    features_list = [row['I{}'.format(i)] for i in range(0, NUMERICCOLS)] + \
+                        [row['C{}'.format(i)] for i in range(0, CATEGORICALCOLS)]
     features_array = np.array(features_list)
     y = row['Label']
     return (features_array, y)
@@ -96,8 +98,8 @@ def dfToRDD(row):
 
 def emitColumnAndCat(line):
     """
-    Takes in a row from RDD and emits a record for each categorical column value along with a zero for one-hot encoding.
-    The emitted values will become a reference dictionary for one-hot encoding in later steps.
+    Takes in a row from RDD and emits a record for each categorical column value along with a zero for one-hot
+    encoding. The emitted values will become a reference dictionary for one-hot encoding in later steps.
         Input: (array([features], dtype='<U21'), 0) or (features, label)
         Output: ((categorical column, category), 0) or (complex key, value)
     The last zero in the output is for initializing one-hot encoding.
@@ -155,7 +157,7 @@ def logLoss(dataRDD, W):
 
 def GDUpdate(dataRDD, W, learningRate = 0.1):
     """
-    Perform one OLS gradient descent step/update.
+    Perform one log loss gradient descent step/update.
     Args:
         dataRDD - records are tuples of (features_array, y)
         W       - (array) model coefficients with bias at index 0
@@ -163,7 +165,7 @@ def GDUpdate(dataRDD, W, learningRate = 0.1):
         new_model - (array) updated coefficients, bias at index 0
     """
     # add a bias 'feature' of 1 at index 0
-    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1])).cache()
+    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
     
     grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
                         .reduce(lambda a, b: a + b)
@@ -207,8 +209,8 @@ def GradientDescent(trainRDD, testRDD, wInit, nSteps = 20,
 # load data
 df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
-testDf.cache()
-trainDf.cache()
+# testDf.cache()
+# trainDf.cache()
 
 # get top n most frequent categories for each column (in training set only)
 n = 10
@@ -227,9 +229,9 @@ fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOL
 
 # impute missing values in training and test set
 trainDf = trainDf.na.fill(fillNADictNum) \
-                 .na.fill(fillNADictCat).cache()
+                 .na.fill(fillNADictCat)
 testDf = testDf.na.fill(fillNADictNum) \
-               .na.fill(fillNADictCat).cache()
+               .na.fill(fillNADictCat)
 
 # replace low-frequency categories with 'rare' string in training and test set
 trainDf = rareReplacer(trainDf, setsMostFreqCatDict) # df gets cached in function
@@ -257,19 +259,7 @@ testRDD = normalize(testRDD, featureMeans, featureStDevs).cache() # use the mean
 featureLen = len(trainRDD.take(1)[0][0])
 wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
-# # 1 iteration of gradient descent
-# w = GDUpdate(trainRDD, wInit)
-
-# nSteps = 10
-# for idx in range(nSteps):
-#     print("----------")
-#     print(f"STEP: {idx+1}")
-#     w = GDUpdate(trainRDD, w)
-#     loss = logLoss(trainRDD, w)
-#     print(f"Loss: {loss}")
-#     print(f"Model: {[round(i,3) for i in w]}")
-
 # run 50 iterations
 start = time.time()
-logLosstrain, logLosstest, models = GradientDescent(trainRDD, testRDD, wInit, nSteps = 50, verbose = True)
+logLosstrain, logLosstest, models = GradientDescent(trainRDD, testRDD, wInit, nSteps = 50, verbose = False)
 print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
