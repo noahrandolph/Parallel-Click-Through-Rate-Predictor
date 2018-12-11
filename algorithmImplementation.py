@@ -31,8 +31,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-#    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
-    df = spark.read.csv(path=MAINCLOUDPATH, sep='\t')
+    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label'] + NUMERICCOLNAMES + CATCOLNAMES
@@ -143,69 +142,31 @@ def normalize(dataRDD, featureMeans, featureStDevs):
     return normedRDD
 
 
+def dataAugmenter(line):
+        """
+        Adds a 1 value to the array of feature values for the bias term
+        """
+        return (np.append([1.0], line[0]), line[1])
+
+
 def logLoss(dataRDD, W):
     """
-    Compute mean squared error.
+    Compute log loss.
     Args:
         dataRDD - each record is a tuple of (features_array, y)
         W       - (array) model coefficients with bias at index 0
     """
-    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
-    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(W, p[0]))))) \
+    augmentedData = dataRDD.map(dataAugmenter)
+    
+    # broadcast the weights
+    bW = sc.broadcast(W)
+    
+    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(bW.value, p[0]))))) \
                         .reduce(lambda a, b: a + b)
     return loss
 
 
-def GDUpdate(dataRDD, W, learningRate = 0.1):
-    """
-    Perform one log loss gradient descent step/update.
-    Args:
-        dataRDD - records are tuples of (features_array, y)
-        W       - (array) model coefficients with bias at index 0
-    Returns:
-        new_model - (array) updated coefficients, bias at index 0
-    """
-    # add a bias 'feature' of 1 at index 0
-    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
-    
-    grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
-                        .reduce(lambda a, b: a + b)
-    new_model = W - learningRate * grad 
-    return new_model
-
-
-def GradientDescent(trainRDD, testRDD, wInit, nSteps = 20, 
-                    learningRate = 0.1, verbose = False):
-    """
-    Perform nSteps iterations of log loss gradient descent and 
-    track loss on a test and train set. Return lists of
-    test/train loss and the models themselves.
-    """
-    # initialize lists to track model performance
-    train_history, test_history, model_history = [], [], []
-    
-    # perform n updates & compute test and train loss after each
-    model = wInit
-    for idx in range(nSteps): 
-        model = GDUpdate(trainRDD, model, learningRate)
-        training_loss = logLoss(trainRDD, model) 
-        test_loss = logLoss(testRDD, model) 
-        
-        # keep track of test/train loss for plotting
-        train_history.append(training_loss)
-        test_history.append(test_loss)
-        model_history.append(model)
-        
-        # console output if desired
-        if verbose:
-            print("----------")
-            print(f"STEP: {idx+1}")
-            print(f"training loss: {training_loss}")
-            print(f"test loss: {test_loss}")
-            print(f"Model: {[round(w,3) for w in model]}")
-    return train_history, test_history, model_history
-
-def GDUpdate_wReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0.1):
+def GDUpdateWithReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0.1):
     """
     Perform one gradient descent step/update with ridge or lasso regularization.
     Args:
@@ -218,27 +179,32 @@ def GDUpdate_wReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0.1
         model   - (array) updated coefficients, bias still at index 0
     """
     # augmented data
-    augmentedData = dataRDD.map(lambda x: (np.append([1.0], x[0]), x[1]))
+    augmentedData = dataRDD.map(dataAugmenter)
     
-    new_model = None
-
-    W = np.array(W)
-    b_W = sc.broadcast(W)
+    # broadcast the weights
+    bW = sc.broadcast(W)
     
-    grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0])) \
+    # this gets parallelized
+    def partialGrad(line):
+        return (-line[1] * (1 - (1 / (1 + np.exp(-line[1] * np.dot(bW.value, line[0]))))) * line[0])
+    
+    # reduce to bring it all back together to compute the gradient
+    grad = augmentedData.map(partialGrad) \
                         .reduce(lambda a, b: a + b)
-    regType = regType.lower()
     
-    if regType == "lasso": #L1 regularization
-        grad[1:] += regParam * np.sign(W[1:])
-    elif regType == "ridge": #L2 regularization
-        grad[1:] += 2 * regParam * W[1:]
-        
+    if regType == 'ridge':
+        reg = 2*regParam * sum(W[1:])
+    elif regType == 'lasso':
+        reg = regParam * sum(W[1:]/np.sign(W[1:]))   
+    else:
+        reg = 0
+    grad = grad + reg
+    
     new_model = W - (grad * learningRate)    
-    
     return new_model
 
-def GradientDescent_wReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate = 0.1,
+
+def GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate = 0.1,
                          regType = None, regParam = 0.1, verbose = False):
     """
     Perform nSteps iterations of regularized gradient descent and 
@@ -246,36 +212,56 @@ def GradientDescent_wReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate = 0
     test/train loss and the models themselves.
     """
     # initialize lists to track model performance
-    train_history, test_history, model_history = [], [], []
+    trainHistory, testHistory, modelHistory = [], [], []
     
     model = wInit
     for idx in range(nSteps):  
         # update the model
-        model = GDUpdate_wReg(trainRDD, model, learningRate, regType, regParam)
+        model = GDUpdateWithReg(trainRDD, model, learningRate, regType, regParam)
+        trainingLoss = logLoss(trainRDD, model) 
+        testLoss = logLoss(testRDD, model) 
         
         # keep track of test/train loss for plotting
-        train_history.append(logLoss(trainRDD, model))
-        test_history.append(logLoss(testRDD, model))
-        model_history.append(model)
+        trainHistory.append(trainingLoss)
+        testHistory.append(testLoss)
+        modelHistory.append(model)
         
         # console output if desired
         if verbose:
             print("----------")
             print(f"STEP: {idx+1}")
-            print(f"training loss: {training_loss}")
-            print(f"test loss: {test_loss}")
+            print(f"training loss: {trainingLoss}")
+            print(f"test loss: {testLoss}")
             print(f"Model: {[round(w,3) for w in model]}")
-    return train_history, test_history, model_history
+    return trainHistory, testHistory, modelHistory
+
+
+# get accuracy of model on test data
+def predictionChecker(line):
+    """
+    Takes final model from gradient descent iterations and makes a prediction on the row of
+    test dataset values.
+    Returns 1 if prediction matches label and 0 otherwise.
+    """
+    predictionProbability = 1/(1 + np.exp(-1 * np.dot(bModel.value, line[0])))
+    if predictionProbability > 0.5:
+        prediction = 1
+    else:
+        prediction = 0
+    if prediction == line[1]:
+        ans = 1
+    else:
+        ans = 0
+    return ans
+
 
 
 # load data
 df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
-# testDf.cache()
-# trainDf.cache()
 
 # get top n most frequent categories for each column (in training set only)
-n = 10
+n = 50
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
@@ -321,7 +307,27 @@ testRDD = normalize(testRDD, featureMeans, featureStDevs).cache() # use the mean
 featureLen = len(trainRDD.take(1)[0][0])
 wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
-# run 50 iterations
+# run training iterations
 start = time.time()
-logLosstrain, logLosstest, models = GradientDescent_wReg(trainRDD, testRDD, wInit, nSteps = 50, regType = "Lasso", verbose = False)
+logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=100, 
+                                                           learningRate = 0.1,
+                                                           regType="ridge", regParam=0.1)
+
+# get model accuracy
+bModel = sc.broadcast(models[-1])
+predictionResults = testRDD.map(dataAugmenter) \
+                           .map(predictionChecker) \
+                           .map(lambda line: (line, 1)) \
+                           .reduce(lambda x,y: (x[0]+y[0], x[1]+y[1]))
+accuracy = predictionResults[0]/predictionResults[1]
+
+
+print("LOG LOSSES OVER TRAINING SET:")
+print(logLossTrain)
+print("LOG LOSSES OVER TEST SET:")
+print(logLossTest)
+print("FINAL MODEL:")
+print(models[-1])
 print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
+print("TEST SET ACCURACY:")
+print(accuracy)
