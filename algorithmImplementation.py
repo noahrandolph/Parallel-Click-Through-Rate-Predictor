@@ -79,7 +79,8 @@ def rareReplacer(df, dictOfMostFreqSets):
     for colName in df.columns[NUMERICCOLS+1:]:
         bagOfCats = dictOfMostFreqSets[colName]
         df = df.withColumn(colName, 
-                           udf(lambda x: 'rare' if x not in bagOfCats else x, StringType())(df[colName])).cache()
+                           udf(lambda x: 'rare' if x not in bagOfCats else x, 
+                               StringType())(df[colName])).cache()
     return df
 
     
@@ -98,8 +99,9 @@ def dfToRDD(row):
 
 def emitColumnAndCat(line):
     """
-    Takes in a row from RDD and emits a record for each categorical column value along with a zero for one-hot
-    encoding. The emitted values will become a reference dictionary for one-hot encoding in later steps.
+    Takes in a row from RDD and emits a record for each categorical column value 
+    along with a zero for one-hot encoding. The emitted values will become a 
+    reference dictionary for one-hot encoding in later steps.
         Input: (array([features], dtype='<U21'), 0) or (features, label)
         Output: ((categorical column, category), 0) or (complex key, value)
     The last zero in the output is for initializing one-hot encoding.
@@ -111,23 +113,25 @@ def emitColumnAndCat(line):
 
 def oneHotEncoder(line):
     """
-    Takes in a row from RDD and emits row where categorical columns are replaced with 1-hot encoded columns.
+    Takes in a row from RDD and emits row where categorical columns are replaced
+    with 1-hot encoded columns.
         Input: (numerical and categorical features, label)
         Output: (numerical and one-hot encoded categorical features, label)
     """
-    oneHotDict = copy.deepcopy(oneHotReference)
+    oneHotDict = copy.deepcopy(bOneHotReference.value)
     elements = line[0][NUMERICCOLS:]
     for catColName, element in zip(CATCOLNAMES, elements):
         oneHotDict[(catColName, element)] = 1
     numericElements = list(line[0][:NUMERICCOLS])
-    features = np.array(numericElements + [value for key, value in oneHotDict.items()], dtype=np.float)
+    features = np.array(numericElements + [value for key, value in oneHotDict.items()],
+                        dtype=np.float)
     return (features, line[1])
 
 
 def getMeanAndVar(trainRDD):
     """
-    Returns the mean and variance of the training dataset for use in normalizing future records
-    (e.g. the test set) to be run on model.
+    Returns the mean and variance of the training dataset for use in normalizing
+    future records (e.g. the test set) to be run on model.
     """
     featureMeans = trainRDD.map(lambda x: x[0]).mean()
     featureStDevs = np.sqrt(trainRDD.map(lambda x: x[0]).variance())
@@ -161,9 +165,14 @@ def logLoss(dataRDD, W):
     # broadcast the weights
     bW = sc.broadcast(W)
     
-    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(bW.value, p[0]))))) \
-                        .reduce(lambda a, b: a + b)
-    return loss
+    def loss(line):
+        loss = np.log(1 + np.exp(-line[1] * np.dot(bW.value, line[0])))
+        return loss
+    
+    losses = augmentedData.map(lambda line: (loss(line), 1)) \
+                          .reduce(lambda x,y: (x[0] + y[0], x[1] + y[1]))
+    cost = losses[0] / losses[1]
+    return cost
 
 
 def GDUpdateWithReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0.1):
@@ -186,11 +195,13 @@ def GDUpdateWithReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0
     
     # this gets parallelized
     def partialGrad(line):
-        return (-line[1] * (1 - (1 / (1 + np.exp(-line[1] * np.dot(bW.value, line[0]))))) * line[0])
+        return (((1 / (1 + np.exp(-1 * np.dot(bW.value, line[0])))) - line[1]) * line[0])
     
     # reduce to bring it all back together to compute the gradient
-    grad = augmentedData.map(partialGrad) \
-                        .reduce(lambda a, b: a + b)
+    weightedLogProbabilities = augmentedData.map(lambda line: (partialGrad(line), 1)) \
+                                            .reduce(lambda x,y: (x[0] + y[0], x[1] + y[1]))
+    
+    nonRegGrad = weightedLogProbabilities[0]/weightedLogProbabilities[1]
     
     if regType == 'ridge':
         reg = 2*regParam * sum(W[1:])
@@ -198,7 +209,7 @@ def GDUpdateWithReg(dataRDD, W, learningRate = 0.1, regType = None, regParam = 0
         reg = regParam * sum(W[1:]/np.sign(W[1:]))   
     else:
         reg = 0
-    grad = grad + reg
+    grad = nonRegGrad + reg
     
     new_model = W - (grad * learningRate)    
     return new_model
@@ -239,8 +250,8 @@ def GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate =
 # get accuracy of model on test data
 def predictionChecker(line):
     """
-    Takes final model from gradient descent iterations and makes a prediction on the row of
-    test dataset values.
+    Takes final model from gradient descent iterations and makes a prediction 
+    on the row of test dataset values.
     Returns 1 if prediction matches label and 0 otherwise.
     """
     predictionProbability = 1/(1 + np.exp(-1 * np.dot(bModel.value, line[0])))
@@ -261,17 +272,22 @@ df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
 
 # get top n most frequent categories for each column (in training set only)
-n = 50
+n = 4
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
-# get dict of sets of most frequent categories in each column for fast lookups during filtering (in later code)
-setsMostFreqCatDict = {key: set(value) for key, value in mostFreqCatDict.items()}
+# get dict of sets of most frequent categories in each column for fast lookups during 
+# filtering (in later code)
+setsMostFreqCatDict = {key: set(value) for key, 
+                       value in mostFreqCatDict.items()}
 
-# get the top category from each column for imputation of missing values (in training set only)
-fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, value in mostFreqCatDict.items()}
+# get the top category from each column for imputation of missing values 
+# (in training set only)
+fillNADictCat = {key: (value[0] if value[0] is not None else value[1]) for key, 
+                 value in mostFreqCatDict.items()}
 
 # get dict of median numeric values for imputation of missing values (in training set only)
-fillNADictNum = {key: value for (key, value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
+fillNADictNum = {key: value for (key, 
+                                 value) in zip(trainDf.columns[1:NUMERICCOLS+1], 
                                                     [x[0] for x in getMedians(trainDf,
                                                                               trainDf.columns[1:NUMERICCOLS+1])])}
 
@@ -291,8 +307,9 @@ testRDD = testDf.rdd.map(dfToRDD).cache()
         
 # create and broadcast reference dictionary to be used in constructing 1 hot encoded RDD
 oneHotReference = trainRDD.flatMap(emitColumnAndCat) \
-                          .reduceByKeyLocally(add) # note: only the zero values are being added here (main goal is to output a dictionary)
-sc.broadcast(oneHotReference)
+                          .reduceByKeyLocally(add) # note: only the zero values are being added here 
+                                                   # (main goal is to output a dictionary)
+bOneHotReference = sc.broadcast(oneHotReference)
 
 # replace rows with new rows having categorical columns 1-hot encoded
 trainRDD = trainRDD.map(oneHotEncoder).cache()
@@ -309,9 +326,9 @@ wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # run training iterations
 start = time.time()
-logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=100, 
+logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=500, 
                                                            learningRate = 0.1,
-                                                           regType="ridge", regParam=0.1)
+                                                           regType="ridge", regParam=0.001)
 
 # get model accuracy
 bModel = sc.broadcast(models[-1])
@@ -327,7 +344,7 @@ print(logLossTrain)
 print("LOG LOSSES OVER TEST SET:")
 print(logLossTest)
 print("FINAL MODEL:")
-print(models[-1])
+print(bModel.value)
 print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
 print("TEST SET ACCURACY:")
 print(accuracy)
