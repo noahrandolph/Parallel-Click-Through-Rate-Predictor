@@ -31,7 +31,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; TOYCLOUDPATH; TOYLOCALPATH
-    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
+    df = spark.read.csv(path=MAINCLOUDPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label'] + NUMERICCOLNAMES + CATCOLNAMES
@@ -249,6 +249,7 @@ def GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate =
 
 def predictionChecker(line):
     """
+    line - tuple of (features array including bias, y)
     Takes final model from gradient descent iterations and makes a prediction 
     on the row of test dataset values.
     Returns true positive, false negative, false positive, or true negative
@@ -329,7 +330,7 @@ wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # run training iterations
 start = time.time()
-logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=200, 
+logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=500, 
                                                            learningRate = 0.1,
                                                            regType="ridge", regParam=0.001)
 
