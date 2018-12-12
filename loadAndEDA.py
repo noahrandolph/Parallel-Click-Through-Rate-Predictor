@@ -50,7 +50,6 @@ def splitIntoTestAndTrain(df):
     trainDf = splits[1]
     return testDf, trainDf
 
-
 def getMedians(df, cols):
     '''returns approximate median values of the columns given, with null values ignored'''
     # 0.5 relative quantile probability and 0.05 relative precision error
@@ -71,6 +70,13 @@ def getTopCountsValues(df, n, cols):
                                          for c in cols])}
     return topCounts_dict
 
+def getTopCountsCategories(df, n, cols):
+    topCounts_dict= {key: value for (key, value) in zip(cols, 
+                                        [[x[0] for x in df.groupBy(c).count().sort(desc("count")).head(n)] \
+                                         for c in cols])}
+    return topCounts_dict
+
+
 def plotHist(df):
     '''plot histogram of numeric features'''
     df.hist(figsize=(15,15), bins=15)
@@ -90,21 +96,30 @@ def CorrMatrix(df):
 
 df = loadData().cache()
 testDf, trainDf = splitIntoTestAndTrain(df)
-print("\nTEST DATASET ROW COUNTS: ", testDf.count())
-print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
-print("\nCOLUMN TYPES\n", df.dtypes)
-print("\nMEDIAN OF NUMERIC COLUMNS\n", getMedians(trainDf, trainDf.columns[1:14]))
 
-print("\nDESCRIPTIONS OF NUMERICAL COLUMNS")
+print("\nTRAIN DATASET ROW COUNTS: ", trainDf.count())
+print("\nTEST DATASET ROW COUNTS: ", testDf.count())
+
+print("\nDISTRIBUTION OF LABELS: TRAIN DATASET")
+trainDf.groupBy("Label").count().show()
+print("\nDISTRIBUTION OF LABELS: TEST DATASET")
+testDf.groupBy("Label").count().show()
+
+print("\nCOLUMN TYPES\n", df.dtypes)
+print("\nMEDIAN OF NUMERIC FEATURES\n", getMedians(trainDf, trainDf.columns[1:14]))
+
+print("\nDESCRIPTIONS OF NUMERICAL FEATURES")
 getDescribe(trainDf, trainDf.columns[1:8])
 getDescribe(trainDf, trainDf.columns[8:14])
 
-print("\nCOUNTS OF NAs")
-checkNA(trainDf, trainDf.columns[:20])
-checkNA(trainDf, trainDf.columns[20:])
+print("TOP OCCURRING VALUES FOR NUMERICAL FEATURES")
+print (getTopCountsCategories(trainDf, 20, trainDf.columns[1:12]))
 
-print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL VARIABLE COLUMNS")
-getDistinctCount(trainDf, trainDf.columns[15:])
+print("\nCOUNTS OF DISTINCT VALUE FOR NUMERICAL FEATURES")
+getDistinctCount(trainDf, trainDf.columns[1:14])
+
+print("\nCOUNTS OF DISTINCT VALUE FOR CATEGORICAL FEATURES")
+getDistinctCount(trainDf, trainDf.columns[14:])
 
 print("\nOCCURENCE COUNT OF TOP 3 MOST FREQUENT VALUES FOR EACH VARIABLE")
 count_n = 3 # Max can only be 3 because one column (c8) has only 3 categorical values
@@ -115,6 +130,11 @@ print("\n")
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[23:34])))
 print("\n")
 print (pd.DataFrame(getTopCountsValues(trainDf, count_n, trainDf.columns[34:])))
+
+
+print("\nCOUNTS OF NAs")
+checkNA(trainDf, trainDf.columns[:20])
+checkNA(trainDf, trainDf.columns[20:])
 
 pandaTrain =trainDf.toPandas()
 print("\nHistograms for Numeric Values")
