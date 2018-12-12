@@ -31,7 +31,7 @@ sc = spark.sparkContext
 def loadData():
     '''load the data into a Spark dataframe'''
     # select path to data: MAINCLOUDPATH; MINICLOUDPATH; MINILOCALPATH
-    df = spark.read.csv(path=MINILOCALPATH, sep='\t')
+    df = spark.read.csv(path=MAINCLOUDPATH, sep='\t')
     # change column names
     oldColNames = df.columns
     newColNames = ['Label']+['I{}'.format(i) for i in range(0,13)]+['C{}'.format(i) for i in range(0,26)]
