@@ -247,24 +247,27 @@ def GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps = 20, learningRate =
     return trainHistory, testHistory, modelHistory
 
 
-# get accuracy of model on test data
 def predictionChecker(line):
     """
     Takes final model from gradient descent iterations and makes a prediction 
     on the row of test dataset values.
-    Returns 1 if prediction matches label and 0 otherwise.
+    Returns true positive, false negative, false positive, or true negative
     """
+    TP, FN, FP, TN = [0, 0, 0, 0]
     predictionProbability = 1/(1 + np.exp(-1 * np.dot(bModel.value, line[0])))
-    if predictionProbability > 0.5:
+    if predictionProbability >= 0.5:
         prediction = 1
     else:
         prediction = 0
-    if prediction == line[1]:
-        ans = 1
-    else:
-        ans = 0
-    return ans
-
+    if prediction == 1 and line[1] == 1:
+        TP = 1
+    elif prediction == 0 and line[1] == 1:
+        FN = 1
+    elif prediction == 1 and line[1] == 0:
+        FP = 1
+    elif prediction == 0 and line[1] == 0:
+        TN = 1
+    return (TP, FN, FP, TN)
 
 
 # load data
@@ -272,7 +275,7 @@ df = loadData()
 testDf, trainDf = splitIntoTestAndTrain(df)
 
 # get top n most frequent categories for each column (in training set only)
-n = 4
+n = 3
 mostFreqCatDict = getMostFrequentCats(trainDf, NUMERICCOLS+1, n)
 
 # get dict of sets of most frequent categories in each column for fast lookups during 
@@ -326,18 +329,23 @@ wInit = np.random.normal(size=featureLen+1) # add 1 for bias
 
 # run training iterations
 start = time.time()
-logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=500, 
+logLossTrain, logLossTest, models = GradientDescentWithReg(trainRDD, testRDD, wInit, nSteps=200, 
                                                            learningRate = 0.1,
                                                            regType="ridge", regParam=0.001)
 
-# get model accuracy
+# get model accuracy, precision, recall, f1 score
 bModel = sc.broadcast(models[-1])
 predictionResults = testRDD.map(dataAugmenter) \
                            .map(predictionChecker) \
-                           .map(lambda line: (line, 1)) \
-                           .reduce(lambda x,y: (x[0]+y[0], x[1]+y[1]))
-accuracy = predictionResults[0]/predictionResults[1]
-
+                           .reduce(lambda x,y: (x[0]+y[0], x[1]+y[1], x[2]+y[2], x[3]+y[3]))
+TP = predictionResults[0]
+FN = predictionResults[1]
+FP = predictionResults[2]
+TN = predictionResults[3]
+accuracy = (TP+TN)/(TP+FN+FP+TN)
+precision = TP/(TP+FP)
+recall = TP/(TP+FN)
+f1Score = 2/((1/recall)+(1/precision))
 
 print("LOG LOSSES OVER TRAINING SET:")
 print(logLossTrain)
@@ -348,3 +356,9 @@ print(bModel.value)
 print(f"\n... trained {len(models)} iterations in {time.time() - start} seconds")
 print("TEST SET ACCURACY:")
 print(accuracy)
+print("TEST SET PRECISION:")
+print(precision)
+print("TEST SET RECALL:")
+print(recall)
+print("TEST SET F1 SCORE:")
+print(f1Score)
