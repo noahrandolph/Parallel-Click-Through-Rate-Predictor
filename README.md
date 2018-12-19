@@ -8,116 +8,8 @@ Wei Wang;
 Alice Lam;
 John Tabbone
 
-### 1. Question Formulation
-
-Click-Through-Rate (CTR), which defines as "the ratio of users who click on a specific link to the number of total users who view a page, email, or advertisement"$^1$, is a key metric that measure online advertisment performance. It demonstrates both 1) how effective the advertising platforms are, and 2) how effective the advertising campaigns are in targeting the right audience. Since the advertising income is highly correlated with CTR, platforms are motivated to improve their CTR to maximize their revenues. The goal of our analysis is to predict CTR, which can be useful to priortize which ad to show whom in order to maximize advertising revenue.
-
-Online platforms ranging from Google, Facebook, to casual game apps are essentially "online real estate" that draws "traffic", i.e. eyeballs on the screen. They can monetize these traffic by charging businesses advertising fee for putting up ads/links on the screen. Traditionally, the fee is charged per impression, hence termed "CPI - Cost-per-impression". Advertisers would have a campaign budget and a desired return on investment from the budget, e.g. bringing 1 million people to their website with a $\$1,000,000$ budget. If the platform's CTR is 10%, the advertisers can only charge up to $\$0.10$ per impression. If the platform's CTR is 100%, then the maximum CPI could reach $\$1$. Online advertising model has gradually evolved to pay-for-performance, i.e. advertisers would only pay if the link is being clicked. Regardless of the advertising revneue model, platforms are highly incentivized to improve CTR.
-
-Based on the current work in the literature on modeling clicks and CTR, the first challenge is to understand user behaviors. Given the limited opportunity ads can be shown to a specific person at any given time, the platform should present the ads that a person is most likely to click. Understanding browsing and clicking behavior of each individual is thus essential in making CTR prediction for each user. Some of the features that are likely significant for such predictions are: time, day of week, location, gender, age, device they are using, sites they are visiting, sites they came from, topics of the ad, color of the ad, pixel location of the ad on the screen, etc. The data we analyze on was made available by Criteo and contains a portion of Criteo's traffic dataset for 7 days. It has both integer and categorical column of features. However, it is completely anonymiezd which limits us from conducting feature selection or engineering that is backed by contextual understanding.
-
-The second challenge is to optimize algorithm speed, which means the prediction can be done in seconds. For example, given the fact that the person is in this location and launched this app at this time of the day, the algorithm should be able to predict the CTR in split second in order to decide which ad to push to the person. Any accurate prediction delivered too late is almost effectively useless. The algorithm speed is hindered by the great amount of traffic volume that comes into the site, as well as the massive amount of data that has numerous categorical variables with high cardinality. We thus leverage Spark to increase the scalability of our analysis. When selecting models, our priority would be speed over performance.
-
-Another approach to mitigate the speed challenge is to __not__ include information generated from the users from last few seconds/minutes/hours. This approach may be at the cost of accuracy as well because immediate information such as current location, last article the person look at, etc, can enhance accuracy significantly. This is a compromise the platforms need to evalaute given their specific business needs and infrastructure. We have no information on whether some of the features in the dataset is immediate features that's received a few seconds prior to the display of the ad. We choose to assume the features may contain such information.
-
-Throughout this project, we use logistics regression model because as the most prevalent algorithm for solving industry scale problems, it is designed to handle categorical dependent variable (Click vs. Non-Click). Logistics regression has its own drawbacks. As a generalized linear model, it requires transformation for non-linear features. This additional step can slow the process down when the feature space and data volume is too large. However, since the probability score outputs that logistics regression generates are straightforward for observations, and it is not particularly affected by mild cases of multi-collinearity, we decide to combine the power of logistics regression and Spark for our analysis.
-
-
-$^1$ https://en.wikipedia.org/wiki/Click-through_rate
-
-### 2. **Algorithm Theory**
-
-#### 2.1  Algorithm Overview
-
-##### Motivation
-
-Logistic regression starts with a linear classifier $f(x) = w^Tx + b$ and applies a sigmoid activation function $\sigma$ such that:
-
-$$\sigma(f(x_{i})) =\begin{cases}
-+1 & x_{i}\ge .5\\
--1 & x_{i}<.5
-\end{cases}
-$$
-
-and
-
-$$\sigma(f(x))=\frac{1}{1+e^{-f(x)}}
-$$
-
-This will 'binarize' the output appropriate to requirements.  
-
-##### Loss Function
-To create an accurate model that can estimate the probability of click event occuring $P(y=1|X)$ given training data X, we need to minimize cost function. 
-
-$$
-P(y=1|x) = \sigma(f(x)) = \frac{1}{1+e^{-f(x)}}\\  
-P(y=-1|x) = 1 - \sigma(f(x)) = \frac{1}{1+e^{f(x)}}  \\   
-P(y_{i}|x_{i}) = \frac{1}{1+e^{-y_{i}f(x_{i})}}    \\
-$$
-
-The likelihood is the combined product of all these probabilities
-
-$$
-\prod_{i}^{n}\frac{1}{1+e^{-y_{i}f(x_{i})}}
-$$
-
-We use the negative log liklehood as the loss function:
-
-$$
-\sum_{i}^{n} \log(1+e^{-y_{i}f(x_{i})})\\
-$$
-
-This is expressed in code in the logLoss() function
-
-    loss = augmentedData.map(lambda p: (np.log(1 + np.exp(-p[1] * np.dot(W, p[0]))))) \
-                        .reduce(lambda a, b: a + b)
-                        
-where<br> 
-$y_{i} = p[1]$, and <br>
-$f(x) = np.dot(W, p[0])$  
-
-##### Gradient Descent
-We use gradient descent to find optimal parameters to minimize the loss function. We find the gradient of the log loss function as:
-
-
-$$
-\nabla w = \sum_{i}^{n} -y\left(1- \frac{1}{1+e^{-y_{i}f(x_{i})}}\right)\cdot x_{i}
-$$
-
-
-Again we can see this formula represented in the code of gdupdate() in the line:
-
-grad = augmentedData.map(lambda p: (-p[1] * (1 - (1 / (1 + np.exp(-p[1] * np.dot(W, p[0]))))) * p[0]))
-
-where<br> 
-$y_{i} = p[1]$,<br>
-$f(x) = np.dot(W, p[0])$, and<br> 
-$x_{i} = p[0]$
-
-##### Iterate
-Below, the toy implementation then initializes the first gradient with a random guess.  It will iterate 5 times over the data, upddating the gradient and displaying the error.
-
-
-
-  
 
 #### Toy Dataset Illustration
-
-To illustrate our process of implementing a logistic regression model, we create a toy dataset that contains 8 rows of randomly generated data, one categorical dependent variable and four features, to mimic the Criteo dataset. In our toy dataset, dependent values are either 1 or -1, which represent the situation of click vs. non-click. Among the four features, we randomly generate integer values range from 0 to 10 for two numeric feature columns, and randomly picked either 0 or 1 for two categorical feature columns. 
-
-While following the above steps, there are two additional modifications that we make in order to improve model accuracy. The first modification is normalizing feature values, which is not neccessary for the toy dataset but is essential for the entire dataset where high data variance occurs. The formula for normalization is:
-\begin{equation}\
-x_n= (x - \mu)/\sigma
-\end{equation}
-where $x_n$ denotes the normalized $x$, $\mu$ denotes the mean of $x$, $\sigma$ denotes the standard deviation of $x$.
-<br>
-
-The second modification is to add a bias term to the initial weights that we randomly generated, which eliminates the hassle of multiplying the data point by the weights and then adding the bias.
-
-One additional note is that when predicting on the entire dataset, we convert categorical data using one-hot encoding. This data manipulation process is not shown in this simplified toy dataset illustration.
-
-Our modeling design takes scalability into consideration. We leverage Spark dataframes and RDDs to make the process scale to a larger dataset. 
-
 
 ```python
 %%writefile toyDataset.py
@@ -320,11 +212,6 @@ for idx in range(nSteps):
 
 
 ### **EDA**
-
-The purpose of our EDA is to understand 
-- the distribution of labels
-- the nature and distribution of each feature
-- correlations among the features.
 
 #### Write LoadAndEDA python file
 
@@ -1214,79 +1101,6 @@ plotErrorCurves(trainLoss, testLoss, title = 'Logistic Regression, n most common
 ![png](output_32_0.png)
 
 
-### 5. Application of Course Concepts
-
-#### 5.1  Normalization
-Data is normalized to create independence in the scales and ranges of features. For example, one might consider normalizing a dataset with the features 'years employed' and 'salary' because years employed has a range from 0 to 30 and salary ranges from 10,000 to 500,000. The wider range of salary might overshadow contributions of years employed.  Once the data is normalized, it has the benefit of being unit neutural. That is, years can be compared to dollars in an apples to apples way.  We chose to normalize the data of all features because some columns had immense ranges compared to other columns.  The contributions of the one hot encoded columns and other features with small ranges would be overshadowed.   Further, we did not know what units were used to measure the features (or if they were even measurable). We chose to standardize the data using the z score: $x_n= (x - \mu)/\sigma$ where $\mu$ is the mean value and $\sigma$ is the standard deviation. This figure expresses the number of standard deviations from the mean an x value is. It casts each datum as a magnitude against the feature set's own statistical characteristics.
-
-Another benefit of normalization is better performance of gradient descent, at least anecdotely. This is most obvious in a linear regression.  Consider a graph minimizing the loss function for the salary/years regression discussed earlier. The graph of the coeficients $\theta_{1}$ and $\theta_{2}$ would be concentric elipses. However the elipses would be extremely elongated and have an aspect ratio of year_range/salary_range (or 30/490000). Extreme surface changes will increase the number of gradients. Now consider standardizing the values using a z score. Most of the data will fall between 3 standard deviations from the mean. 
-
-#### 5.2  One Hot Encoding
-One Hot Encoding is a technique used to convert categorical data into numeric data. This is a useful and often essential task in data preperation because many classification and regression methods, logistic regression included, require all features to be in numeric form.
-
-In order to encode a feature, you first must identify all the unique categories. This requires all the categories of a feature to be shared among all machines in the cluster. The categorical feature is removed and the data structure is expanded to add new columns (features) for each category. A '1' or '0' value is placed in each column acording to the original value of the category. For example, the second data set is a one hot encoded version of the first.
-
-|count|fruit  |
-|-----|----------|
-|10   |bannana|
-|5    |apple  |
-|20   |orange|
-|12   |orange|
-|15   |bannana|
-
-
-|count|bannana  | apple |orange|
-|-----|---------|-------|------|
-|10   |1        | 0     |  0   |
-|5    |0        | 1     |  0   |
-|20   |0        | 0     |  1   |
-|12   |0        | 0     |  1   |
-|15   |1        | 0     |  0   |
-
-
-For toy data sets this representation is workable, however for large datasets like ours there are tradeoffs to consider. In our small data set, among all the categorical features, there are about 72000 unique values. In the large dataet there were over 30 milion. We observed that there were more columns than rows. If every category is promoted in importance to be represented by its own coefficient in the regression, there would probably not be enough data and more important contributers would be crowded out. Our team avoided this by only using the top 3 categories per feature.
-
-Also troubling is the task of loading and storing in this format. It would create an explosion in size that would consume resources and slow down development and debugging. Say goodbye to head(5) with 72000, let alone 30m, additional columns! If you could even load the structure into memory.
-
-Thankfully, PySpark.ml provides striped representation of the data. Stripes is a more dense representation for one hot encoded features because the 0 values are not actually stored, but presumed to be default. Instead of creating new columns for each new category-feature, the Spark OneHotEncoderEstimator will produce a single column with values representing the entire row of categorical data. For example, using this dense representation on the original count/fruit table yields:
-
-|count|fruit  |
-|-----|----------|
-|10   |(3,[0],[1])|
-|5    |(3,[1],[1])  |
-|20   |(3,[2],[1])|
-|12   |(3,[2],[1])|
-|15   |(3,[0],[1])|
-
-where each item is a tupple in the form (NUM,[POS],[VAL])
-Where NUM is the number of columns (features) in the one hot encode, POS is the position of the feature in the row, and VAL is the value of the feature.  For example, the first row (3,[0],[1]) translates to 3 columns total, with a 1 in position 0 in this row.  Which is equivilant to:
-
-|count|bannana  | apple |orange|
-|-----|---------|-------|------|
-|10   |1        | 0     |  0   |
-
-
-Naturally, this dense representation works well in the Spark.ml API ecosystem.  Having implemented a homegrown version of logistic regression, we  implemented a homegrown version of one hot encoding as well, in our logloss and gdupdate methods.  The PySpark.ml representation would probably have sped things up by minimizing data moving on the network, memory utilization, and maybe even disk swaping.  
-
-#### 5.3  Scalability
-Had it not been for cloud based comodity hardware, there would be no MIDS program, and little data science. It makes big things possible, but it is not a cure all for bad programming habits.  Maybe you've heard of Wirth's law regarding software bloat.  'Software expands to fill all new resources', 'Software gets slower more rapidly than hardware becomes faster' are a few forms.  Having more computing power at our fingertips makes abuse easier.
-
-Consider the above example, one hot encoding.  It is very easy to be lulled into thinking that one hot encoding the whole dataset would be a workable part of the solution.  Thankfully we caught it before we tried to implement it.
-
-But far from relieving programmers from thinking about scaleability, programming in this environment makes you very conscious of it in a way that you don't have to be when programming on a single machine.  For example map() and flatMap()s are narrow transformations.  They can work with data in the local partition.  Our code does that 15 times. The 4 reduces are wide transformations that require a shuffle.  Even though reduce is done strategically, it is sometime not avoidable:
-
-Occurances of Reduce:
-In GDUpdateWithReg, this is most expensive because it occurs once per iteration.
-
-To calculate predictionResults.  This only occurs once per execution.
-
-To calculate LogLoss:  Unfortunately, this is done twice per iteration.  We could have executed it a few times for the whole execution.
-
-
-
-#### 5.4  Cacheing
-
-We also applied the concept of cacheing to store the transformed RDD for gradient descent. The transformation process is very time consuming as we 1) normalize numerical variables with calculation of mean and standard deviation, 2) compute and select top occurring values per categorical features and replace the low frequency values with 'rare' tag, and 3) impute NAs with info from last two steps. At every point we update the weights of the regression, we need to refer back to the transformed variables. We cache the transformed RDD such that we only conduct the transformation once, instead of conducting the transformation of variables at every gradient descent step.
 
 
 
