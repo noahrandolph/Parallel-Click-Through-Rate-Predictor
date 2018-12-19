@@ -33,10 +33,12 @@ $^1$ https://en.wikipedia.org/wiki/Click-through_rate
 
 Logistic regression starts with a linear classifier $f(x) = w^Tx + b$ and applies a sigmoid activation function $\sigma$ such that:
 
-$$\sigma(f(x_{i})) =\begin{cases}
+\begin{equation}
+\sigma(f(x_{i})) =\begin{cases}
 +1 & x_{i}\ge .5\\
 -1 & x_{i}<.5
-\end{cases} $$
+\end{cases}
+\end{equation}
 
 and
 
