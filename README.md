@@ -23,7 +23,7 @@ Another approach to mitigate the speed challenge is to __not__ include informati
 Throughout this project, we use logistics regression model because as the most prevalent algorithm for solving industry scale problems, it is designed to handle categorical dependent variable (Click vs. Non-Click). Logistics regression has its own drawbacks. As a generalized linear model, it requires transformation for non-linear features. This additional step can slow the process down when the feature space and data volume is too large. However, since the probability score outputs that logistics regression generates are straightforward for observations, and it is not particularly affected by mild cases of multi-collinearity, we decide to combine the power of logistics regression and Spark for our analysis.
 
 
-^1 https://en.wikipedia.org/wiki/Click-through_rate
+$^1$ https://en.wikipedia.org/wiki/Click-through_rate
 
 ### 2. **Algorithm Theory**
 
@@ -33,10 +33,11 @@ Throughout this project, we use logistics regression model because as the most p
 
 Logistic regression starts with a linear classifier $f(x) = w^Tx + b$ and applies a sigmoid activation function $\sigma$ such that:
 
-\sigma(f(x_{i})) =\begin{cases}
+$$\sigma(f(x_{i})) =\begin{cases}
 +1 & x_{i}\ge .5\\
 -1 & x_{i}<.5
 \end{cases}
+$$
 
 and
 
